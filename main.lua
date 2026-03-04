@@ -624,8 +624,22 @@ function Lib.new(opts)
 end
 
 function Lib:Toggle()
-    self.Shown=not self.Shown
+    local anyVisible = false
+    for _,w in ipairs(self.Windows) do
+        if w and w.Root and w.Root.Visible then anyVisible = true; break end
+    end
+    self.Shown = not anyVisible
     for _,w in ipairs(self.Windows) do if w and w.Root then w.Root.Visible=self.Shown end end
+end
+
+function Lib:Show()
+    self.Shown = true
+    for _,w in ipairs(self.Windows) do if w and w.Root then w.Root.Visible=true end end
+end
+
+function Lib:Hide()
+    self.Shown = false
+    for _,w in ipairs(self.Windows) do if w and w.Root then w.Root.Visible=false end end
 end
 function Lib:Unload() pcall(function() self._sg:Destroy() end) end
 function Lib:SetToggleKey(k) self._toggleKey.key=k end
@@ -809,18 +823,54 @@ end
 
 function Lib:CreateKeySystem(opts)
     opts = opts or {}
+
+    local keyType     = opts.KeyType    or "static"
     local validKey    = opts.Key        or "NEBULA-FREE"
+    local keyUrl      = opts.KeyUrl     or ""
     local getKeyUrl   = opts.GetKeyUrl  or "https://example.com/getkey"
     local title       = opts.Title      or "Key System"
     local subtitle    = opts.Subtitle   or "verification required"
     local onSuccess   = opts.OnSuccess  or function() end
     local savedFile   = (opts.SaveName  or "NebulaKey") .. ".txt"
 
+    local lib = self
+
+    local function doSuccess()
+        lib:Show()
+        task.spawn(onSuccess)
+    end
+
+    local function checkKey(entered)
+        local trimmed = entered:match("^%s*(.-)%s*$")
+        if keyType == "url" then
+            local ok, body = pcall(game.HttpGet, game, keyUrl)
+            if ok and body then
+                local fetched = body:match("^%s*(.-)%s*$")
+                return trimmed == fetched, fetched
+            end
+            return false, nil
+        else
+            return trimmed == validKey, validKey
+        end
+    end
+
+    lib:Hide()
+
     if HAS_READFILE then
         local ok, saved = pcall(readfile, savedFile)
-        if ok and saved and saved:match("^%s*(.-)%s*$") == validKey then
-            task.spawn(onSuccess)
-            return
+        if ok and saved then
+            local trimmed = saved:match("^%s*(.-)%s*$")
+            local valid
+            if keyType == "url" then
+                local ok2, body = pcall(game.HttpGet, game, keyUrl)
+                if ok2 and body then valid = trimmed == body:match("^%s*(.-)%s*$") end
+            else
+                valid = trimmed == validKey
+            end
+            if valid then
+                task.defer(doSuccess)
+                return
+            end
         end
     end
 
@@ -960,40 +1010,48 @@ function Lib:CreateKeySystem(opts)
         TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, Parent = body,
     })
 
+    local checking = false
     checkBtn.MouseButton1Click:Connect(function()
-        local entered = inputBox.Text:match("^%s*(.-)%s*$")
-        if entered == validKey then
-            if HAS_WRITEFILE then pcall(writefile, savedFile, entered) end
-            statusLbl.Text = "Key accepted!"
-            statusLbl.TextColor3 = Color3.fromRGB(45,195,85)
-            TW(inputBg, 0.15, {BackgroundColor3 = Color3.fromRGB(18,38,22)})
-            task.delay(0.6, function()
-                TW(card, 0.3, {Size = UDim2.new(0,380,0,0), Position = UDim2.new(0.5,0,0.5,0)})
-                TW(overlay, 0.3, {BackgroundTransparency = 1})
-                task.wait(0.35)
-                pcall(function() sg:Destroy() end)
-                task.spawn(onSuccess)
-            end)
-        else
-            statusLbl.Text = "Invalid key. Try again."
-            statusLbl.TextColor3 = Color3.fromRGB(208,50,50)
-            TW(inputBg, 0.1, {BackgroundColor3 = Color3.fromRGB(38,12,12)})
-            task.delay(0.5, function()
-                TW(inputBg, 0.2, {BackgroundColor3 = T.DropBG})
-            end)
-        end
+        if checking then return end
+        checking = true
+        local entered = inputBox.Text
+        statusLbl.Text = keyType == "url" and "Fetching key..." or "Checking..."
+        statusLbl.TextColor3 = Color3.fromRGB(90,90,110)
+        task.spawn(function()
+            local valid, _ = checkKey(entered)
+            if valid then
+                if HAS_WRITEFILE then pcall(writefile, savedFile, entered:match("^%s*(.-)%s*$")) end
+                statusLbl.Text = "Key accepted!"
+                statusLbl.TextColor3 = Color3.fromRGB(45,195,85)
+                TW(inputBg, 0.15, {BackgroundColor3 = Color3.fromRGB(18,38,22)})
+                task.delay(0.6, function()
+                    TW(card, 0.3, {Size = UDim2.new(0,380,0,0), Position = UDim2.new(0.5,0,0.5,0)})
+                    TW(overlay, 0.3, {BackgroundTransparency = 1})
+                    task.wait(0.35)
+                    pcall(function() sg:Destroy() end)
+                    doSuccess()
+                end)
+            else
+                statusLbl.Text = "Invalid key. Try again."
+                statusLbl.TextColor3 = Color3.fromRGB(208,50,50)
+                TW(inputBg, 0.1, {BackgroundColor3 = Color3.fromRGB(38,12,12)})
+                task.delay(0.5, function()
+                    TW(inputBg, 0.2, {BackgroundColor3 = T.DropBG})
+                end)
+                checking = false
+            end
+        end)
     end)
 
     getKeyBtn.MouseButton1Click:Connect(function()
-        local ok3 = pcall(function()
-            if setclipboard then
-                setclipboard(getKeyUrl)
-            elseif toclipboard then
-                toclipboard(getKeyUrl)
-            end
+        local copied = false
+        pcall(function()
+            if setclipboard then setclipboard(getKeyUrl)
+            elseif toclipboard then toclipboard(getKeyUrl) end
+            copied = true
         end)
-        statusLbl.Text = ok3 and "Link copied to clipboard!" or "Open: " .. getKeyUrl
-        statusLbl.TextColor3 = ok3 and T.Accent or Color3.fromRGB(210,168,35)
+        statusLbl.Text = copied and "Link copied to clipboard!" or ("Open: " .. getKeyUrl)
+        statusLbl.TextColor3 = copied and T.Accent or Color3.fromRGB(210,168,35)
     end)
 
     card.Position = UDim2.new(0.5,0,0.4,0)
