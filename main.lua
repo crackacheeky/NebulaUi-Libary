@@ -1,6 +1,3 @@
--- NebulaUI v3.3 | Matcha/Comfort
--- Fixes: (1) topbar no duplicate subtitle  (2) tabs blend + indicator works on load
---        (3) toggle keybind works at default (closure reads inst.ToggleKey live)
 
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -238,34 +235,70 @@ local function MkSection(parent, cfg, name)
         local dbox=New("TextButton",{Position=UDim2.new(0,0,0,18),Size=UDim2.new(1,0,0,26),
             BackgroundColor3=T.DropBG,BorderSizePixel=0,Text="",AutoButtonColor=false,Parent=wrap})
         Rnd(4,dbox); Brdr(T.DropBorder,1,dbox)
-        local slbl=New("TextLabel",{Position=UDim2.new(0,9,0,0),Size=UDim2.new(1,-26,1,0),
+        -- Selected label: truncate so long names never overflow the box border
+        local slbl=New("TextLabel",{Position=UDim2.new(0,9,0,0),Size=UDim2.new(1,-28,1,0),
             BackgroundTransparency=1,Text=sel,TextColor3=T.ItemLabel,TextSize=12,Font=T.Font,
-            TextXAlignment=Enum.TextXAlignment.Left,Parent=dbox})
+            TextXAlignment=Enum.TextXAlignment.Left,
+            TextTruncate=Enum.TextTruncate.AtEnd,   -- ← clips overflowing text with "…"
+            Parent=dbox})
         local arr=New("TextLabel",{AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-7,0.5,0),
             Size=UDim2.new(0,12,0,12),BackgroundTransparency=1,Text="▾",TextColor3=T.SubInactive,
             TextSize=13,Font=T.FontBold,Parent=dbox})
-        local listH=math.min(#items,6)*24+4
-        local dlist=New("Frame",{Position=UDim2.new(0,0,0,46),Size=UDim2.new(1,0,0,listH),
-            BackgroundColor3=T.DropBG,BorderSizePixel=0,Visible=false,ZIndex=60,Parent=wrap})
-        Rnd(4,dlist); Brdr(T.DropBorder,1,dlist); VList(dlist,0); Pad(2,2,0,0,dlist)
 
-        for _,item in ipairs(items) do
-            local ib=New("TextButton",{Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,
-                Text=item,TextColor3=item==sel and T.Accent or T.ItemLabel,TextSize=12,Font=T.Font,
-                AutoButtonColor=false,ZIndex=61,Parent=dlist})
-            ib.TextXAlignment=Enum.TextXAlignment.Left; Pad(0,0,10,0,ib)
-            ib.MouseEnter:Connect(function() TW(ib,0.07,{BackgroundColor3=T.DropHover}) end)
-            ib.MouseLeave:Connect(function() TW(ib,0.07,{BackgroundColor3=Color3.fromRGB(0,0,0,0)}) end)
-            ib.MouseButton1Click:Connect(function()
-                sel=item; slbl.Text=item
-                for _,ch in ipairs(dlist:GetChildren()) do
-                    if ch:IsA("TextButton") then TW(ch,0.1,{TextColor3=ch.Text==sel and T.Accent or T.ItemLabel}) end
-                end
-                isOpen=false; dlist.Visible=false; TW(arr,0.15,{Rotation=0})
-                if flag then cfg:set(flag,sel) end; task.spawn(cb,sel)
-            end)
+        -- Dropdown list — ZIndex 200 so it floats above the ScrollingFrame
+        -- ClipsDescendants=false on the scroll frame won't help (Roblox clips at SF boundary),
+        -- so we parent the list to the wrap Frame which is NOT a ScrollingFrame; wrap itself
+        -- sits inside the scroll but the list overflows downward visibly.
+        local dlist=New("Frame",{Position=UDim2.new(0,0,0,46),Size=UDim2.new(1,0,0,4),
+            BackgroundColor3=T.DropBG,BorderSizePixel=0,Visible=false,
+            ZIndex=200,ClipsDescendants=false,Parent=wrap})
+        Rnd(4,dlist); Brdr(T.DropBorder,1,dlist)
+        -- Use a ScrollingFrame inside dlist so many items scroll cleanly
+        local maxVisItems=6
+        local listSF=New("ScrollingFrame",{
+            Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,
+            ScrollBarThickness=2,ScrollBarImageColor3=T.ScrollBar,
+            CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
+            ZIndex=201,Parent=dlist})
+        VList(listSF,0); Pad(2,2,0,0,listSF)
+
+        -- Helper: build item buttons from an item list
+        local function buildItems(list)
+            -- Clear existing
+            for _,ch in ipairs(listSF:GetChildren()) do
+                if ch:IsA("TextButton") or ch:IsA("Frame") then ch:Destroy() end
+            end
+            -- Cap visible height, enable scroll if more
+            local visH=math.min(#list,maxVisItems)*24+4
+            dlist.Size=UDim2.new(1,0,0,visH)
+            for _,item in ipairs(list) do
+                local ib=New("TextButton",{Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,
+                    Text=item,TextColor3=item==sel and T.Accent or T.ItemLabel,
+                    TextSize=12,Font=T.Font,AutoButtonColor=false,
+                    TextXAlignment=Enum.TextXAlignment.Left,
+                    TextTruncate=Enum.TextTruncate.AtEnd,   -- ← items also truncate
+                    ZIndex=202,Parent=listSF})
+                Pad(0,0,10,6,ib)
+                ib.MouseEnter:Connect(function() TW(ib,0.07,{BackgroundColor3=T.DropHover}) end)
+                ib.MouseLeave:Connect(function() TW(ib,0.07,{BackgroundColor3=Color3.fromRGB(0,0,0,0)}) end)
+                ib.MouseButton1Click:Connect(function()
+                    sel=item; slbl.Text=item
+                    for _,ch2 in ipairs(listSF:GetChildren()) do
+                        if ch2:IsA("TextButton") then
+                            TW(ch2,0.1,{TextColor3=ch2.Text==sel and T.Accent or T.ItemLabel})
+                        end
+                    end
+                    isOpen=false; dlist.Visible=false; TW(arr,0.15,{Rotation=0})
+                    if flag then cfg:set(flag,sel) end; task.spawn(cb,sel)
+                end)
+            end
         end
-        dbox.MouseButton1Click:Connect(function() isOpen=not isOpen; dlist.Visible=isOpen; TW(arr,0.15,{Rotation=isOpen and 180 or 0}) end)
+        buildItems(items)
+
+        dbox.MouseButton1Click:Connect(function()
+            isOpen=not isOpen; dlist.Visible=isOpen
+            TW(arr,0.15,{Rotation=isOpen and 180 or 0})
+        end)
         dbox.MouseEnter:Connect(function() TW(dbox,0.07,{BackgroundColor3=T.DropHover}) end)
         dbox.MouseLeave:Connect(function() TW(dbox,0.07,{BackgroundColor3=T.DropBG}) end)
         New("Frame",{Size=UDim2.new(1,0,0,4),BackgroundTransparency=1,Parent=wrap})
@@ -273,6 +306,14 @@ local function MkSection(parent, cfg, name)
         local obj={}
         function obj:Set(v) sel=v; slbl.Text=v; if flag then cfg:set(flag,v) end; task.spawn(cb,v) end
         function obj:Get() return sel end
+        -- Rebuild: pass a new items table — clears old buttons and creates fresh ones
+        function obj:Rebuild(newItems)
+            items=newItems
+            if not sel or not table.find(items,sel) then sel=items[1] or "" end
+            slbl.Text=sel
+            if flag then cfg:set(flag,sel) end
+            buildItems(items)
+        end
         return obj
     end
 
