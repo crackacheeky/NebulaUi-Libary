@@ -558,6 +558,51 @@ local function MkSection(parent, cfg, name)
     end
 
     
+
+    function S:AddTextBox(o)
+        o = o or {}
+        local lbl         = o.Name        or "Text"
+        local def         = o.Default     or ""
+        local placeholder = o.Placeholder or "Type here..."
+        local flag        = o.Flag
+        local cb          = o.Callback    or function() end
+        local val         = def
+
+        local wrap = New("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,Parent=parent})
+        New("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=lbl,TextColor3=T.ItemLabel,
+            TextSize=12,Font=T.Font,TextXAlignment=Enum.TextXAlignment.Left,Parent=wrap})
+        local bg = New("Frame",{Position=UDim2.new(0,0,0,18),Size=UDim2.new(1,0,0,28),
+            BackgroundColor3=T.DropBG,BorderSizePixel=0,Parent=wrap})
+        Rnd(5,bg); Brdr(T.DropBorder,1,bg)
+        local tb = New("TextBox",{
+            Position=UDim2.new(0,9,0,0), Size=UDim2.new(1,-18,1,0),
+            BackgroundTransparency=1, Text=def,
+            PlaceholderText=placeholder, PlaceholderColor3=Color3.fromRGB(60,60,78),
+            TextColor3=T.ItemLabel, TextSize=12, Font=T.Font,
+            TextXAlignment=Enum.TextXAlignment.Left,
+            ClearTextOnFocus=false, Parent=bg,
+        })
+        tb:GetPropertyChangedSignal("Text"):Connect(function()
+            val = tb.Text
+            if flag then cfg:set(flag,val) end
+        end)
+        tb.FocusLost:Connect(function()
+            val = tb.Text:match("^%s*(.-)%s*$")
+            tb.Text = val
+            if flag then cfg:set(flag,val) end
+            task.spawn(cb,val)
+        end)
+        tb.Focused:Connect(function() TW(bg,0.08,{BackgroundColor3=T.DropHover}) end)
+        tb.FocusLost:Connect(function() TW(bg,0.12,{BackgroundColor3=T.DropBG}) end)
+        New("Frame",{Size=UDim2.new(1,0,0,4),BackgroundTransparency=1,Parent=wrap})
+
+        local obj={}
+        function obj:Set(v) val=tostring(v); tb.Text=val; if flag then cfg:set(flag,val) end end
+        function obj:Get() return val end
+        if flag then cfg:reg(flag,def,function(v) obj:Set(tostring(v)) end) end
+        return obj
+    end
+
     function S:AddButton(o)
         o=o or {}
         local lbl=o.Name or "Button"; local cb=o.Callback or function()end
@@ -593,7 +638,7 @@ function Lib.new(opts)
     local inst=setmetatable({},Lib)
     inst.Windows={}
     inst.Cfg=Cfg.new(opts.Name or "NebulaUI")
-    inst._toggleKey={ key=opts.ToggleKey or Enum.KeyCode.RightShift }
+    inst._toggleKey={ key=opts.ToggleKey or Enum.KeyCode.Insert }
     inst.Shown=true
     inst.SetAccent=SetAccent
 
@@ -1005,7 +1050,7 @@ function Lib:CreateKeySystem(opts)
     New("TextLabel", {
         Position = UDim2.new(0,18,0,152), Size = UDim2.new(1,-36,0,38),
         BackgroundTransparency = 1,
-        Text = "Click 'Get Key' to open the key page, copy your key,\nthen paste it above and press 'Check Key'.",
+        Text = "Click 'Get Key' to copy the key page link.\nComplete the page to get your key, paste it above.",
         TextColor3 = Color3.fromRGB(58,58,74), TextSize = 10, Font = T.Font,
         TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, Parent = body,
     })
