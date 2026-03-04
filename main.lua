@@ -228,11 +228,9 @@ local function MkSection(parent, cfg, name)
                 kbBtn.Text = "..."
                 kbBtn.TextColor3 = T.KbTextActive
                 TW(kbBtn, 0.1, {BackgroundColor3=T.KbActive})
-                
-                local conn; conn = UserInputService.InputBegan:Connect(function(inp, gp)
-                    if gp then return end
+                local conn
+                conn = UserInputService.InputBegan:Connect(function(inp, gp)
                     if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
-                    
                     if inp.KeyCode == Enum.KeyCode.Escape then
                         listening = false
                         kbBtn.Text = boundKey and fmtKey(boundKey) or "none"
