@@ -13,7 +13,6 @@ local HAS_READFILE  = type(readfile)  == "function"
 local T = {
     WinBG        = Color3.fromRGB(20, 20, 24),
     TopBar       = Color3.fromRGB(14, 14, 18),
-    -- TabBG intentionally same as WinBG so the row is invisible — seamless blend
     TabBG        = Color3.fromRGB(20, 20, 24),
     ColBG        = Color3.fromRGB(27, 27, 33),
     Accent       = Color3.fromRGB(235, 75, 175),
@@ -31,7 +30,9 @@ local T = {
     SectionLbl   = Color3.fromRGB(90, 90, 110),
     ItemLabel    = Color3.fromRGB(208, 208, 220),
     KbBG         = Color3.fromRGB(32, 32, 44),
+    KbActive     = Color3.fromRGB(60, 20, 50),
     KbText       = Color3.fromRGB(85, 85, 108),
+    KbTextActive = Color3.fromRGB(235, 75, 175),
     Divider      = Color3.fromRGB(34, 34, 44),
     ScrollBar    = Color3.fromRGB(235, 75, 175),
     BadgeBG      = Color3.fromRGB(46, 14, 36),
@@ -47,6 +48,7 @@ local function RegAccent(obj, prop)
 end
 local function SetAccent(c)
     T.Accent=c; T.SubActive=c; T.SliderFill=c; T.CheckOn=c; T.ScrollBar=c
+    T.KbTextActive=c; T.BadgeBG=Color3.fromRGB(math.floor(c.R*60),math.floor(c.G*20),math.floor(c.B*50))
     for _,e in ipairs(AccentObjs) do pcall(function() e.o[e.p]=c end) end
 end
 
@@ -64,6 +66,33 @@ local function Brdr(c,t,p) New("UIStroke",{Color=c,Thickness=t,ApplyStrokeMode=E
 local function Pad(a,b,c,d,p) New("UIPadding",{PaddingTop=UDim.new(0,a),PaddingBottom=UDim.new(0,b),PaddingLeft=UDim.new(0,c),PaddingRight=UDim.new(0,d),Parent=p}) end
 local function VList(p,g) New("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,g or 0),Parent=p}) end
 local function HList(p,g) New("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,g or 0),Parent=p}) end
+
+-- Draw a small triangle arrow using a rotated Frame+UIGradient trick
+-- rot=0 → pointing down (▼), rot=180 → pointing up (▲)
+local function MkArrow(parent, rot)
+    local holder = New("Frame",{
+        AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-7,0.5,0),
+        Size=UDim2.new(0,10,0,6), BackgroundTransparency=1, Parent=parent
+    })
+    -- Two diagonal lines forming a chevron, drawn with rotated thin frames
+    local function MkLine(ax,ay,rot2,w,h)
+        local f=New("Frame",{
+            AnchorPoint=Vector2.new(0.5,0.5),
+            Position=UDim2.new(ax,0,ay,0),
+            Size=UDim2.new(0,w,0,h),
+            Rotation=rot2,
+            BackgroundColor3=T.SubInactive,
+            BorderSizePixel=0, Parent=holder
+        })
+        Rnd(1,f)
+        return f
+    end
+    -- Two lines forming V shape: left arm (rotated ~40°) and right arm (~-40°)
+    local l1 = MkLine(0.28, 0.5,  40, 2, 7)
+    local l2 = MkLine(0.72, 0.5, -40, 2, 7)
+    holder.Rotation = rot or 0
+    return holder, l1, l2
+end
 
 local function Drag(frame, handle)
     local dn,ds,sp=false,nil,nil
@@ -102,10 +131,18 @@ local function UnHex(s)
     return Color3.fromRGB(tonumber(s:sub(1,2),16)or 0,tonumber(s:sub(3,4),16)or 0,tonumber(s:sub(5,6),16)or 0)
 end
 
--- Config
+-- ────────────────────────────────────────────────────
+--  CONFIG  — with post-load callback firing
+-- ────────────────────────────────────────────────────
 local Cfg={}; Cfg.__index=Cfg
-function Cfg.new(n) return setmetatable({_n=n,_d={}},Cfg) end
-function Cfg:reg(f,v) if self._d[f]==nil then self._d[f]=v end end
+function Cfg.new(n)
+    return setmetatable({_n=n, _d={}, _setters={}}, Cfg)
+end
+-- reg: record default AND register a setter so load() can sync the widget
+function Cfg:reg(flag, default, setter)
+    if self._d[flag]==nil then self._d[flag]=default end
+    if setter then self._setters[flag]=setter end
+end
 function Cfg:set(f,v) self._d[f]=v end
 function Cfg:get(f)   return self._d[f] end
 function Cfg:save(n)
@@ -116,13 +153,23 @@ end
 function Cfg:load(n)
     if not HAS_READFILE then return false,"readfile not supported" end
     local ok,d=pcall(readfile,self._n.."_"..n..".json")
-    if ok and d then local ok2,t=pcall(function() return HttpService:JSONDecode(d) end)
-        if ok2 and t then for k,v in pairs(t) do self._d[k]=v end end end
+    if ok and d then
+        local ok2,t=pcall(function() return HttpService:JSONDecode(d) end)
+        if ok2 and t then
+            for k,v in pairs(t) do self._d[k]=v end
+            -- Fire all registered setters so widgets visually reflect loaded values
+            for flag,setter in pairs(self._setters) do
+                if self._d[flag]~=nil then
+                    task.spawn(function() pcall(setter, self._d[flag]) end)
+                end
+            end
+        end
+    end
     return ok, ok and "Loaded" or "File not found"
 end
 
 -- ════════════════════════════════════════════════════
---  SECTION  (flat elements on column background)
+--  SECTION
 -- ════════════════════════════════════════════════════
 local function MkSection(parent, cfg, name)
     local S={}
@@ -133,48 +180,141 @@ local function MkSection(parent, cfg, name)
             TextXAlignment=Enum.TextXAlignment.Left,Parent=parent})
     end
 
-    -- CHECKBOX
+    -- ── CHECKBOX (with functional, rebindable keybind) ──────────────
     function S:AddCheckbox(o)
         o=o or {}
-        local lbl=o.Name or "Option"; local def=o.Default or false
-        local flag=o.Flag; local kb=o.Keybind; local cb=o.Callback or function()end
-        if flag then cfg:reg(flag,def) end; local state=def
+        local lbl   = o.Name     or "Option"
+        local def   = o.Default  or false
+        local flag  = o.Flag
+        local kbDef = o.Keybind  -- optional initial keybind string e.g. "RightShift"
+        local cb    = o.Callback or function() end
+        local state = def
 
-        local row=New("TextButton",{Size=UDim2.new(1,0,0,22),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=parent})
-        local box=New("Frame",{Position=UDim2.new(0,0,0.5,-6),Size=UDim2.new(0,13,0,13),
+        -- resolve initial KeyCode from string
+        local boundKey = nil
+        if kbDef then
+            pcall(function() boundKey = Enum.KeyCode[kbDef] end)
+        end
+
+        local row = New("TextButton",{Size=UDim2.new(1,0,0,22),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=parent})
+        local box = New("Frame",{Position=UDim2.new(0,0,0.5,-6),Size=UDim2.new(0,13,0,13),
             BackgroundColor3=state and T.CheckOn or T.CheckBG,BorderSizePixel=0,Parent=row})
         Rnd(2,box); Brdr(T.CheckBorder,1,box)
-        local tick=New("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+        local tick = New("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
             Text="✓",TextColor3=Color3.new(1,1,1),TextSize=9,Font=T.FontBold,Visible=state,Parent=box})
         New("TextLabel",{Position=UDim2.new(0,20,0,0),Size=UDim2.new(1,-56,1,0),BackgroundTransparency=1,
-            Text=lbl,TextColor3=T.ItemLabel,TextSize=12,Font=T.Font,TextXAlignment=Enum.TextXAlignment.Left,Parent=row})
-        if kb then
-            local b=New("TextLabel",{AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,0,0.5,0),
-                Size=UDim2.new(0,32,0,16),BackgroundColor3=T.KbBG,BorderSizePixel=0,
-                Text=kb,TextColor3=T.KbText,TextSize=10,Font=T.FontLight,Parent=row})
-            Rnd(3,b)
+            Text=lbl,TextColor3=T.ItemLabel,TextSize=12,Font=T.Font,
+            TextXAlignment=Enum.TextXAlignment.Left,Parent=row})
+
+        local kbBtn = nil
+        local listening = false
+
+        -- Helper: format KeyCode name to short badge text
+        local function fmtKey(kc)
+            if not kc then return "..." end
+            local n = kc.Name
+            -- shorten common names
+            local shorts = {RightShift="RShift",LeftShift="LShift",RightControl="RCtrl",LeftControl="LCtrl",
+                RightAlt="RAlt",LeftAlt="LAlt",Return="Enter",BackSpace="Back"}
+            return shorts[n] or (n:sub(1,6))
         end
+
+        if kbDef ~= nil then
+            -- Always create the badge when Keybind is specified (even as empty string)
+            local initTxt = boundKey and fmtKey(boundKey) or "..."
+            kbBtn = New("TextButton",{
+                AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,0,0.5,0),
+                Size=UDim2.new(0,40,0,16),
+                BackgroundColor3=T.KbBG, BorderSizePixel=0,
+                Text=initTxt, TextColor3=T.KbText,
+                TextSize=10, Font=T.FontLight,
+                AutoButtonColor=false, Parent=row
+            })
+            Rnd(3,kbBtn)
+
+            kbBtn.MouseButton1Click:Connect(function()
+                if listening then return end
+                listening = true
+                kbBtn.Text = "..."
+                kbBtn.TextColor3 = T.KbTextActive
+                TW(kbBtn, 0.1, {BackgroundColor3=T.KbActive})
+                -- Wait for next key press
+                local conn; conn = UserInputService.InputBegan:Connect(function(inp, gp)
+                    if gp then return end
+                    if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                    -- Escape = cancel
+                    if inp.KeyCode == Enum.KeyCode.Escape then
+                        listening = false
+                        kbBtn.Text = boundKey and fmtKey(boundKey) or "none"
+                        kbBtn.TextColor3 = T.KbText
+                        TW(kbBtn, 0.1, {BackgroundColor3=T.KbBG})
+                        conn:Disconnect()
+                        return
+                    end
+                    boundKey = inp.KeyCode
+                    listening = false
+                    kbBtn.Text = fmtKey(boundKey)
+                    kbBtn.TextColor3 = T.KbText
+                    TW(kbBtn, 0.1, {BackgroundColor3=T.KbBG})
+                    conn:Disconnect()
+                end)
+            end)
+            kbBtn.MouseEnter:Connect(function() if not listening then TW(kbBtn,0.07,{BackgroundColor3=T.DropHover}) end end)
+            kbBtn.MouseLeave:Connect(function() if not listening then TW(kbBtn,0.07,{BackgroundColor3=T.KbBG}) end end)
+        end
+
+        -- Global key listener fires the checkbox toggle
+        UserInputService.InputBegan:Connect(function(inp, gp)
+            if gp or listening then return end
+            if boundKey and inp.KeyCode == boundKey then
+                state = not state
+                if flag then cfg:set(flag, state) end
+                local col = state and T.CheckOn or T.CheckBG
+                TW(box, 0.12, {BackgroundColor3=col})
+                tick.Visible = state
+                task.spawn(cb, state)
+            end
+        end)
+
         local function upd(anim)
-            local col=state and T.CheckOn or T.CheckBG
+            local col = state and T.CheckOn or T.CheckBG
             if anim then TW(box,0.12,{BackgroundColor3=col}) else pcall(function() box.BackgroundColor3=col end) end
-            tick.Visible=state
+            tick.Visible = state
         end
-        row.MouseButton1Click:Connect(function() state=not state; if flag then cfg:set(flag,state) end; upd(true); task.spawn(cb,state) end)
+
+        row.MouseButton1Click:Connect(function()
+            state = not state
+            if flag then cfg:set(flag,state) end
+            upd(true); task.spawn(cb,state)
+        end)
         row.MouseEnter:Connect(function() TW(row,0.07,{BackgroundColor3=Color3.fromRGB(28,28,38)}) end)
         row.MouseLeave:Connect(function() TW(row,0.07,{BackgroundColor3=Color3.fromRGB(0,0,0,0)}) end)
+
         local obj={}
-        function obj:Set(v) state=v; if flag then cfg:set(flag,v) end; upd(true); task.spawn(cb,v) end
+        function obj:Set(v)
+            state=v; if flag then cfg:set(flag,v) end; upd(true); task.spawn(cb,v)
+        end
         function obj:Get() return state end
+
+        -- Register setter so Cfg:load() can push the saved value back into this widget
+        if flag then
+            cfg:reg(flag, def, function(v)
+                -- v from JSON is bool
+                local b = (v==true or v=="true")
+                obj:Set(b)
+            end)
+        end
+
         return obj
     end
 
-    -- SLIDER
+    -- ── SLIDER ──────────────────────────────────────────────────────
     function S:AddSlider(o)
         o=o or {}
         local lbl=o.Name or "Value"; local mn=o.Min or 0; local mx=o.Max or 100
         local def=o.Default or mn; local dec=o.Decimals or 0; local sfx=o.Suffix or ""
         local flag=o.Flag; local cb=o.Callback or function()end
-        if flag then cfg:reg(flag,def) end; local val=math.clamp(def,mn,mx)
+        local val=math.clamp(def,mn,mx)
 
         local wrap=New("Frame",{Size=UDim2.new(1,0,0,34),BackgroundTransparency=1,Parent=parent})
         New("TextLabel",{Position=UDim2.new(0,0,0,2),Size=UDim2.new(0.65,0,0,14),BackgroundTransparency=1,
@@ -216,18 +356,23 @@ local function MkSection(parent, cfg, name)
             end
         end)
         New("Frame",{Size=UDim2.new(1,0,0,2),BackgroundTransparency=1,Parent=parent})
+
         local obj={}
-        function obj:Set(v) setV(math.clamp((v-mn)/(mx-mn),0,1)) end
+        function obj:Set(v)
+            local n=tonumber(v); if not n then return end
+            setV(math.clamp((n-mn)/(mx-mn),0,1))
+        end
         function obj:Get() return val end
+        if flag then cfg:reg(flag, def, function(v) obj:Set(v) end) end
         return obj
     end
 
-    -- DROPDOWN
+    -- ── DROPDOWN ────────────────────────────────────────────────────
     function S:AddDropdown(o)
         o=o or {}
         local lbl=o.Name or "Select"; local items=o.Items or {}
         local def=o.Default or (items[1] or ""); local flag=o.Flag; local cb=o.Callback or function()end
-        if flag then cfg:reg(flag,def) end; local sel=def; local isOpen=false
+        local sel=def; local isOpen=false
 
         local wrap=New("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,Parent=parent})
         New("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=lbl,TextColor3=T.ItemLabel,
@@ -235,26 +380,42 @@ local function MkSection(parent, cfg, name)
         local dbox=New("TextButton",{Position=UDim2.new(0,0,0,18),Size=UDim2.new(1,0,0,26),
             BackgroundColor3=T.DropBG,BorderSizePixel=0,Text="",AutoButtonColor=false,Parent=wrap})
         Rnd(4,dbox); Brdr(T.DropBorder,1,dbox)
-        -- Selected label: truncate so long names never overflow the box border
         local slbl=New("TextLabel",{Position=UDim2.new(0,9,0,0),Size=UDim2.new(1,-28,1,0),
             BackgroundTransparency=1,Text=sel,TextColor3=T.ItemLabel,TextSize=12,Font=T.Font,
             TextXAlignment=Enum.TextXAlignment.Left,
-            TextTruncate=Enum.TextTruncate.AtEnd,   -- ← clips overflowing text with "…"
+            TextTruncate=Enum.TextTruncate.AtEnd,
             Parent=dbox})
-        local arr=New("TextLabel",{AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-7,0.5,0),
-            Size=UDim2.new(0,12,0,12),BackgroundTransparency=1,Text="▾",TextColor3=T.SubInactive,
-            TextSize=13,Font=T.FontBold,Parent=dbox})
 
-        -- Dropdown list — ZIndex 200 so it floats above the ScrollingFrame
-        -- ClipsDescendants=false on the scroll frame won't help (Roblox clips at SF boundary),
-        -- so we parent the list to the wrap Frame which is NOT a ScrollingFrame; wrap itself
-        -- sits inside the scroll but the list overflows downward visibly.
+        -- Arrow: a real chevron made of two rotated frames (not Unicode glyph)
+        -- This renders correctly on all Roblox fonts
+        local arrHolder = New("Frame",{
+            AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-8,0.5,0),
+            Size=UDim2.new(0,10,0,6),
+            BackgroundTransparency=1, Parent=dbox
+        })
+        local function mkChevLine(ax, rot2)
+            local f = New("Frame",{
+                AnchorPoint=Vector2.new(0.5,0.5),
+                Position=UDim2.new(ax,0,0.5,0),
+                Size=UDim2.new(0,2,0,7),
+                Rotation=rot2,
+                BackgroundColor3=T.SubInactive,
+                BorderSizePixel=0, Parent=arrHolder
+            })
+            Rnd(1,f); return f
+        end
+        mkChevLine(0.28,  40)  -- left arm of V
+        mkChevLine(0.72, -40)  -- right arm of V
+        -- Tween the holder's Rotation: 0=down, 180=up
+        local function setArrow(open)
+            TW(arrHolder, 0.15, {Rotation = open and 180 or 0})
+        end
+
         local dlist=New("Frame",{Position=UDim2.new(0,0,0,46),Size=UDim2.new(1,0,0,4),
             BackgroundColor3=T.DropBG,BorderSizePixel=0,Visible=false,
             ZIndex=200,ClipsDescendants=false,Parent=wrap})
         Rnd(4,dlist); Brdr(T.DropBorder,1,dlist)
-        -- Use a ScrollingFrame inside dlist so many items scroll cleanly
-        local maxVisItems=6
+        local maxVis=6
         local listSF=New("ScrollingFrame",{
             Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,
             ScrollBarThickness=2,ScrollBarImageColor3=T.ScrollBar,
@@ -262,21 +423,18 @@ local function MkSection(parent, cfg, name)
             ZIndex=201,Parent=dlist})
         VList(listSF,0); Pad(2,2,0,0,listSF)
 
-        -- Helper: build item buttons from an item list
         local function buildItems(list)
-            -- Clear existing
             for _,ch in ipairs(listSF:GetChildren()) do
                 if ch:IsA("TextButton") or ch:IsA("Frame") then ch:Destroy() end
             end
-            -- Cap visible height, enable scroll if more
-            local visH=math.min(#list,maxVisItems)*24+4
+            local visH=math.min(#list,maxVis)*24+4
             dlist.Size=UDim2.new(1,0,0,visH)
             for _,item in ipairs(list) do
                 local ib=New("TextButton",{Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,
                     Text=item,TextColor3=item==sel and T.Accent or T.ItemLabel,
                     TextSize=12,Font=T.Font,AutoButtonColor=false,
                     TextXAlignment=Enum.TextXAlignment.Left,
-                    TextTruncate=Enum.TextTruncate.AtEnd,   -- ← items also truncate
+                    TextTruncate=Enum.TextTruncate.AtEnd,
                     ZIndex=202,Parent=listSF})
                 Pad(0,0,10,6,ib)
                 ib.MouseEnter:Connect(function() TW(ib,0.07,{BackgroundColor3=T.DropHover}) end)
@@ -288,7 +446,7 @@ local function MkSection(parent, cfg, name)
                             TW(ch2,0.1,{TextColor3=ch2.Text==sel and T.Accent or T.ItemLabel})
                         end
                     end
-                    isOpen=false; dlist.Visible=false; TW(arr,0.15,{Rotation=0})
+                    isOpen=false; dlist.Visible=false; setArrow(false)
                     if flag then cfg:set(flag,sel) end; task.spawn(cb,sel)
                 end)
             end
@@ -296,17 +454,17 @@ local function MkSection(parent, cfg, name)
         buildItems(items)
 
         dbox.MouseButton1Click:Connect(function()
-            isOpen=not isOpen; dlist.Visible=isOpen
-            TW(arr,0.15,{Rotation=isOpen and 180 or 0})
+            isOpen=not isOpen; dlist.Visible=isOpen; setArrow(isOpen)
         end)
         dbox.MouseEnter:Connect(function() TW(dbox,0.07,{BackgroundColor3=T.DropHover}) end)
         dbox.MouseLeave:Connect(function() TW(dbox,0.07,{BackgroundColor3=T.DropBG}) end)
         New("Frame",{Size=UDim2.new(1,0,0,4),BackgroundTransparency=1,Parent=wrap})
 
         local obj={}
-        function obj:Set(v) sel=v; slbl.Text=v; if flag then cfg:set(flag,v) end; task.spawn(cb,v) end
+        function obj:Set(v)
+            sel=v; slbl.Text=v; if flag then cfg:set(flag,v) end; task.spawn(cb,v)
+        end
         function obj:Get() return sel end
-        -- Rebuild: pass a new items table — clears old buttons and creates fresh ones
         function obj:Rebuild(newItems)
             items=newItems
             if not sel or not table.find(items,sel) then sel=items[1] or "" end
@@ -314,15 +472,21 @@ local function MkSection(parent, cfg, name)
             if flag then cfg:set(flag,sel) end
             buildItems(items)
         end
+        if flag then
+            cfg:reg(flag, def, function(v)
+                -- find closest match in current items
+                local s = tostring(v)
+                if table.find(items, s) then obj:Set(s) end
+            end)
+        end
         return obj
     end
 
-    -- COLOR PICKER
+    -- ── COLOR PICKER ────────────────────────────────────────────────
     function S:AddColorPicker(o)
         o=o or {}
         local lbl=o.Name or "Color"; local def=o.Default or Color3.fromRGB(235,75,175)
         local flag=o.Flag; local cb=o.Callback or function()end
-        if flag then cfg:reg(flag,{def.R,def.G,def.B}) end
         local cc=def; local isOpen=false; local h,s,v=R2H(cc)
 
         local wrap=New("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,Parent=parent})
@@ -377,7 +541,9 @@ local function MkSection(parent, cfg, name)
         local hb2=New("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",ZIndex=43,Parent=hbar})
         svb.MouseButton1Down:Connect(function() svDn=true end)
         hb2.MouseButton1Down:Connect(function() hDn=true end)
-        UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then svDn=false; hDn=false end end)
+        UserInputService.InputEnded:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseButton1 then svDn=false; hDn=false end
+        end)
         RunService.Heartbeat:Connect(function()
             if svDn then local m=UserInputService:GetMouseLocation(); local ap,sz=svc.AbsolutePosition,svc.AbsoluteSize
                 if sz.X>0 and sz.Y>0 then s=math.clamp((m.X-ap.X)/sz.X,0,1); v=1-math.clamp((m.Y-ap.Y)/sz.Y,0,1); applyCol() end end
@@ -390,12 +556,18 @@ local function MkSection(parent, cfg, name)
         New("Frame",{Size=UDim2.new(1,0,0,4),BackgroundTransparency=1,Parent=wrap})
 
         local obj={}
-        function obj:Set(c2) h,s,v=R2H(c2); applyCol() end
+        function obj:Set(c2)
+            if type(c2)=="table" then c2=Color3.new(c2[1],c2[2],c2[3]) end
+            h,s,v=R2H(c2); applyCol()
+        end
         function obj:Get() return cc end
+        if flag then cfg:reg(flag, {def.R,def.G,def.B}, function(val)
+            if type(val)=="table" then obj:Set(val) end
+        end) end
         return obj
     end
 
-    -- BUTTON
+    -- ── BUTTON ──────────────────────────────────────────────────────
     function S:AddButton(o)
         o=o or {}
         local lbl=o.Name or "Button"; local cb=o.Callback or function()end
@@ -434,7 +606,6 @@ function Lib.new(opts)
     local inst=setmetatable({},Lib)
     inst.Windows={}
     inst.Cfg=Cfg.new(opts.Name or "NebulaUI")
-    -- FIX: store ToggleKey in a table so closure reads it live
     inst._toggleKey={ key=opts.ToggleKey or Enum.KeyCode.RightShift }
     inst.Shown=true
     inst.SetAccent=SetAccent
@@ -451,7 +622,6 @@ function Lib.new(opts)
     New("UIListLayout",{VerticalAlignment=Enum.VerticalAlignment.Bottom,SortOrder=Enum.SortOrder.LayoutOrder,
         Padding=UDim.new(0,6),Parent=inst.NF})
 
-    -- FIX: closure captures inst._toggleKey table, reads .key each time → always current
     UserInputService.InputBegan:Connect(function(i, gp)
         if not gp and i.KeyCode == inst._toggleKey.key then inst:Toggle() end
     end)
@@ -470,12 +640,8 @@ function Lib:Toggle()
     self.Shown=not self.Shown
     for _,w in ipairs(self.Windows) do if w and w.Root then w.Root.Visible=self.Shown end end
 end
-
 function Lib:Unload() pcall(function() self._sg:Destroy() end) end
-
--- FIX: SetToggleKey writes into the table the closure already captured
 function Lib:SetToggleKey(k) self._toggleKey.key=k end
-
 function Lib:GetFlag(f) return self.Cfg:get(f) end
 function Lib:SetFlag(f,v) self.Cfg:set(f,v) end
 
@@ -518,50 +684,21 @@ function Lib:CreateWindow(opts)
     local clip=New("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ClipsDescendants=true,Parent=W.Root})
     Rnd(8,clip)
 
-    -- ── TOPBAR ──────────────────────────────────────────────────────────
-    -- CRITICAL: title label only shows `title`. Badge is a separate frame showing `subtitle`.
-    -- We use a fixed pixel-width container so nothing overflows and overlaps the badge.
+    -- TOPBAR
     local topBar=New("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=T.TopBar,BorderSizePixel=0,Parent=clip})
-
-    -- Title text — clamped width so it cannot bleed into badge area
     local titlePx = math.clamp(#title * 8, 30, 160)
-    New("TextLabel",{
-        Position=UDim2.new(0,12,0,0),
-        Size=UDim2.new(0,titlePx,1,0),       -- fixed pixel width, no overflow
-        BackgroundTransparency=1,
-        Text=title,                            -- ← ONLY title here, no subtitle
-        TextColor3=Color3.fromRGB(112,112,132),
-        TextSize=12, Font=T.FontBold,
-        TextXAlignment=Enum.TextXAlignment.Left,
-        TextTruncate=Enum.TextTruncate.AtEnd, -- safety: truncate if somehow too long
-        Parent=topBar,
-    })
-    -- Thin separator arrow
-    New("TextLabel",{
-        Position=UDim2.new(0, 12+titlePx+5, 0,0),
-        Size=UDim2.new(0,12,1,0),
-        BackgroundTransparency=1,
-        Text="›", TextColor3=Color3.fromRGB(50,50,65),
-        TextSize=11, Font=T.Font,
-        Parent=topBar,
-    })
-    -- Badge — subtitle appears ONLY here
-    local badgeX = 12 + titlePx + 5 + 14
-    local badgeW = math.max(#subtitle * 7 + 14, 36)
-    local badge=New("Frame",{
-        Position=UDim2.new(0,badgeX,0.5,-8),
-        Size=UDim2.new(0,badgeW,0,16),
-        BackgroundColor3=T.BadgeBG, BorderSizePixel=0,
-        Parent=topBar,
-    })
+    New("TextLabel",{Position=UDim2.new(0,12,0,0),Size=UDim2.new(0,titlePx,1,0),
+        BackgroundTransparency=1,Text=title,TextColor3=Color3.fromRGB(112,112,132),
+        TextSize=12,Font=T.FontBold,TextXAlignment=Enum.TextXAlignment.Left,
+        TextTruncate=Enum.TextTruncate.AtEnd,Parent=topBar})
+    New("TextLabel",{Position=UDim2.new(0,12+titlePx+5,0,0),Size=UDim2.new(0,12,1,0),
+        BackgroundTransparency=1,Text="›",TextColor3=Color3.fromRGB(50,50,65),TextSize=11,Font=T.Font,Parent=topBar})
+    local badgeX=12+titlePx+5+14; local badgeW=math.max(#subtitle*7+14,36)
+    local badge=New("Frame",{Position=UDim2.new(0,badgeX,0.5,-8),Size=UDim2.new(0,badgeW,0,16),
+        BackgroundColor3=T.BadgeBG,BorderSizePixel=0,Parent=topBar})
     Rnd(4,badge)
-    New("TextLabel",{
-        Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
-        Text=subtitle,            -- ← subtitle text ONLY in badge
-        TextColor3=T.Accent, TextSize=10, Font=T.FontBold,
-        Parent=badge,
-    })
-
+    New("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text=subtitle,
+        TextColor3=T.Accent,TextSize=10,Font=T.FontBold,Parent=badge})
     if user~="" then
         New("TextLabel",{AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-28,0.5,0),
             Size=UDim2.new(0,160,0,20),BackgroundTransparency=1,
@@ -577,55 +714,33 @@ function Lib:CreateWindow(opts)
     closeBtn.MouseLeave:Connect(function() TW(closeBtn,0.1,{BackgroundColor3=Color3.fromRGB(172,38,38)}) end)
     Drag(W.Root,topBar)
 
-    -- ── TAB ROW ─────────────────────────────────────────────────────────
-    -- Same color as WinBG → completely invisible, tabs look flat and blended
-    local tabRow=New("Frame",{
-        Position=UDim2.new(0,0,0,32),
-        Size=UDim2.new(1,0,0,32),
-        BackgroundColor3=T.TabBG,   -- == WinBG → seamless
-        BorderSizePixel=0,
-        Parent=clip,
-    })
-    -- Subtle single-pixel bottom divider
+    -- TAB ROW
+    local tabRow=New("Frame",{Position=UDim2.new(0,0,0,32),Size=UDim2.new(1,0,0,32),
+        BackgroundColor3=T.TabBG,BorderSizePixel=0,Parent=clip})
     New("Frame",{AnchorPoint=Vector2.new(0,1),Position=UDim2.new(0,0,1,0),
         Size=UDim2.new(1,0,0,1),BackgroundColor3=T.Divider,BorderSizePixel=0,Parent=tabRow})
-
     local tabHolder=New("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Parent=tabRow})
-    HList(tabHolder,0)
-    Pad(0,0,10,10,tabHolder)
+    HList(tabHolder,0); Pad(0,0,10,10,tabHolder)
 
     local contentHolder=New("Frame",{Position=UDim2.new(0,0,0,64),Size=UDim2.new(1,0,1,-64),
         BackgroundTransparency=1,Parent=clip})
 
     function W:AddTab(tabName)
         local Tab={Window=W,SubTabs={},ActiveSubTab=nil}
-
-        local tbtn=New("TextButton",{
-            Size=UDim2.new(0,0,1,0),AutomaticSize=Enum.AutomaticSize.X,
-            BackgroundTransparency=1,BorderSizePixel=0,
-            Text=tabName,TextColor3=T.SubInactive,
-            TextSize=12,Font=T.Font,AutoButtonColor=false,Parent=tabHolder,
-        })
+        local tbtn=New("TextButton",{Size=UDim2.new(0,0,1,0),AutomaticSize=Enum.AutomaticSize.X,
+            BackgroundTransparency=1,BorderSizePixel=0,Text=tabName,TextColor3=T.SubInactive,
+            TextSize=12,Font=T.Font,AutoButtonColor=false,Parent=tabHolder})
         Pad(0,0,13,13,tbtn)
-
-        -- Accent underline indicator (bottom of button, centered, animates width)
-        local indLine=New("Frame",{
-            AnchorPoint=Vector2.new(0.5,1),Position=UDim2.new(0.5,0,1,0),
-            Size=UDim2.new(0,0,0,2),
-            BackgroundColor3=T.Accent,BorderSizePixel=0,Parent=tbtn,
-        })
+        local indLine=New("Frame",{AnchorPoint=Vector2.new(0.5,1),Position=UDim2.new(0.5,0,1,0),
+            Size=UDim2.new(0,0,0,2),BackgroundColor3=T.Accent,BorderSizePixel=0,Parent=tbtn})
         Rnd(99,indLine); RegAccent(indLine,"BackgroundColor3")
 
         local tabContent=New("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false,Parent=contentHolder})
-
         local subBarRow=New("Frame",{Size=UDim2.new(1,0,0,28),BackgroundTransparency=1,Parent=tabContent})
         HList(subBarRow,20); Pad(0,0,14,14,subBarRow)
         New("Frame",{AnchorPoint=Vector2.new(0,1),Position=UDim2.new(0,0,1,0),
             Size=UDim2.new(1,0,0,1),BackgroundColor3=T.Divider,BorderSizePixel=0,Parent=subBarRow})
-
-        local colArea=New("Frame",{Position=UDim2.new(0,0,0,28),Size=UDim2.new(1,0,1,-28),
-            BackgroundTransparency=1,Parent=tabContent})
-
+        local colArea=New("Frame",{Position=UDim2.new(0,0,0,28),Size=UDim2.new(1,0,1,-28),BackgroundTransparency=1,Parent=tabContent})
         local mkScroll=function(pos,sz)
             local sf=New("ScrollingFrame",{Position=pos,Size=sz,BackgroundColor3=T.ColBG,BorderSizePixel=0,
                 ScrollBarThickness=2,ScrollBarImageColor3=T.ScrollBar,
@@ -635,7 +750,6 @@ function Lib:CreateWindow(opts)
         end
         local defL=mkScroll(UDim2.new(0,8,0,8),UDim2.new(0.5,-12,1,-16))
         local defR=mkScroll(UDim2.new(0.5,4,0,8),UDim2.new(0.5,-12,1,-16))
-
         Tab.Btn=tbtn; Tab.Ind=indLine; Tab.Content=tabContent
         Tab.SubBarRow=subBarRow; Tab.ColArea=colArea; Tab.DefL=defL; Tab.DefR=defR
 
@@ -647,15 +761,9 @@ function Lib:CreateWindow(opts)
             end
             tabContent.Visible=true
             TW(tbtn,0.14,{TextColor3=T.ItemLabel})
-            -- FIX: defer reading AbsoluteSize until next frame so it's non-zero
             task.defer(function()
                 local w=tbtn.AbsoluteSize.X
-                if w>0 then
-                    TW(indLine,0.2,{Size=UDim2.new(0,w,0,2)})
-                else
-                    -- fallback: use a reasonable default if UI hasn't rendered yet
-                    indLine.Size=UDim2.new(0,60,0,2)
-                end
+                TW(indLine,0.2,{Size=UDim2.new(0,w>0 and w or 60,0,2)})
             end)
             W.ActiveTab=Tab
         end
@@ -664,14 +772,9 @@ function Lib:CreateWindow(opts)
         tbtn.MouseEnter:Connect(function() if W.ActiveTab~=Tab then TW(tbtn,0.1,{TextColor3=T.ItemLabel}) end end)
         tbtn.MouseLeave:Connect(function() if W.ActiveTab~=Tab then TW(tbtn,0.1,{TextColor3=T.SubInactive}) end end)
         table.insert(W.Tabs,Tab)
-        if #W.Tabs==1 then
-            -- FIX: first tab runs activateTab after a short delay so AbsoluteSize is ready
-            task.delay(0.05,activateTab)
-        end
+        if #W.Tabs==1 then task.delay(0.05,activateTab) end
 
-        function Tab:GetColumns()
-            return NewCol(defL,cfg),NewCol(defR,cfg)
-        end
+        function Tab:GetColumns() return NewCol(defL,cfg),NewCol(defR,cfg) end
 
         function Tab:AddSubTab(subName)
             local ST={}; ST.Tab=self
@@ -681,7 +784,6 @@ function Lib:CreateWindow(opts)
             local uline=New("Frame",{AnchorPoint=Vector2.new(0.5,1),Position=UDim2.new(0.5,0,1,0),
                 Size=UDim2.new(0,0,0,1),BackgroundColor3=T.Accent,BorderSizePixel=0,Parent=sbtn})
             Rnd(99,uline); RegAccent(uline,"BackgroundColor3")
-
             local scL=mkScroll(UDim2.new(0,8,0,8),UDim2.new(0.5,-12,1,-16)); scL.Visible=false
             local scR=mkScroll(UDim2.new(0.5,4,0,8),UDim2.new(0.5,-12,1,-16)); scR.Visible=false
             ST.Btn=sbtn; ST.ULine=uline; ST.CL=scL; ST.CR=scR
