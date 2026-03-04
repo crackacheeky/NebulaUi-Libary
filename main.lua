@@ -1,4 +1,3 @@
-
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
@@ -67,14 +66,12 @@ local function Pad(a,b,c,d,p) New("UIPadding",{PaddingTop=UDim.new(0,a),PaddingB
 local function VList(p,g) New("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,g or 0),Parent=p}) end
 local function HList(p,g) New("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,g or 0),Parent=p}) end
 
--- Draw a small triangle arrow using a rotated Frame+UIGradient trick
--- rot=0 → pointing down (▼), rot=180 → pointing up (▲)
 local function MkArrow(parent, rot)
     local holder = New("Frame",{
         AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-7,0.5,0),
         Size=UDim2.new(0,10,0,6), BackgroundTransparency=1, Parent=parent
     })
-    -- Two diagonal lines forming a chevron, drawn with rotated thin frames
+    
     local function MkLine(ax,ay,rot2,w,h)
         local f=New("Frame",{
             AnchorPoint=Vector2.new(0.5,0.5),
@@ -87,7 +84,7 @@ local function MkArrow(parent, rot)
         Rnd(1,f)
         return f
     end
-    -- Two lines forming V shape: left arm (rotated ~40°) and right arm (~-40°)
+    
     local l1 = MkLine(0.28, 0.5,  40, 2, 7)
     local l2 = MkLine(0.72, 0.5, -40, 2, 7)
     holder.Rotation = rot or 0
@@ -109,7 +106,6 @@ local function Drag(frame, handle)
     end)
 end
 
--- Color helpers
 local function H2R(h,s,v)
     if s==0 then return Color3.new(v,v,v) end
     local i=math.floor(h*6); local f=h*6-i; local p,q,t2=v*(1-s),v*(1-f*s),v*(1-(1-f)*s); i=i%6
@@ -131,14 +127,11 @@ local function UnHex(s)
     return Color3.fromRGB(tonumber(s:sub(1,2),16)or 0,tonumber(s:sub(3,4),16)or 0,tonumber(s:sub(5,6),16)or 0)
 end
 
--- ────────────────────────────────────────────────────
---  CONFIG  — with post-load callback firing
--- ────────────────────────────────────────────────────
 local Cfg={}; Cfg.__index=Cfg
 function Cfg.new(n)
     return setmetatable({_n=n, _d={}, _setters={}}, Cfg)
 end
--- reg: record default AND register a setter so load() can sync the widget
+
 function Cfg:reg(flag, default, setter)
     if self._d[flag]==nil then self._d[flag]=default end
     if setter then self._setters[flag]=setter end
@@ -157,7 +150,7 @@ function Cfg:load(n)
         local ok2,t=pcall(function() return HttpService:JSONDecode(d) end)
         if ok2 and t then
             for k,v in pairs(t) do self._d[k]=v end
-            -- Fire all registered setters so widgets visually reflect loaded values
+            
             for flag,setter in pairs(self._setters) do
                 if self._d[flag]~=nil then
                     task.spawn(function() pcall(setter, self._d[flag]) end)
@@ -168,9 +161,6 @@ function Cfg:load(n)
     return ok, ok and "Loaded" or "File not found"
 end
 
--- ════════════════════════════════════════════════════
---  SECTION
--- ════════════════════════════════════════════════════
 local function MkSection(parent, cfg, name)
     local S={}
     if name and name~="" then
@@ -180,17 +170,17 @@ local function MkSection(parent, cfg, name)
             TextXAlignment=Enum.TextXAlignment.Left,Parent=parent})
     end
 
-    -- ── CHECKBOX (with functional, rebindable keybind) ──────────────
+    
     function S:AddCheckbox(o)
         o=o or {}
         local lbl   = o.Name     or "Option"
         local def   = o.Default  or false
         local flag  = o.Flag
-        local kbDef = o.Keybind  -- optional initial keybind string e.g. "RightShift"
+        local kbDef = o.Keybind  
         local cb    = o.Callback or function() end
         local state = def
 
-        -- resolve initial KeyCode from string
+        
         local boundKey = nil
         if kbDef then
             pcall(function() boundKey = Enum.KeyCode[kbDef] end)
@@ -209,18 +199,18 @@ local function MkSection(parent, cfg, name)
         local kbBtn = nil
         local listening = false
 
-        -- Helper: format KeyCode name to short badge text
+        
         local function fmtKey(kc)
             if not kc then return "..." end
             local n = kc.Name
-            -- shorten common names
+            
             local shorts = {RightShift="RShift",LeftShift="LShift",RightControl="RCtrl",LeftControl="LCtrl",
                 RightAlt="RAlt",LeftAlt="LAlt",Return="Enter",BackSpace="Back"}
             return shorts[n] or (n:sub(1,6))
         end
 
         if kbDef ~= nil then
-            -- Always create the badge when Keybind is specified (even as empty string)
+            
             local initTxt = boundKey and fmtKey(boundKey) or "..."
             kbBtn = New("TextButton",{
                 AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,0,0.5,0),
@@ -238,11 +228,11 @@ local function MkSection(parent, cfg, name)
                 kbBtn.Text = "..."
                 kbBtn.TextColor3 = T.KbTextActive
                 TW(kbBtn, 0.1, {BackgroundColor3=T.KbActive})
-                -- Wait for next key press
+                
                 local conn; conn = UserInputService.InputBegan:Connect(function(inp, gp)
                     if gp then return end
                     if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
-                    -- Escape = cancel
+                    
                     if inp.KeyCode == Enum.KeyCode.Escape then
                         listening = false
                         kbBtn.Text = boundKey and fmtKey(boundKey) or "none"
@@ -263,7 +253,7 @@ local function MkSection(parent, cfg, name)
             kbBtn.MouseLeave:Connect(function() if not listening then TW(kbBtn,0.07,{BackgroundColor3=T.KbBG}) end end)
         end
 
-        -- Global key listener fires the checkbox toggle
+        
         UserInputService.InputBegan:Connect(function(inp, gp)
             if gp or listening then return end
             if boundKey and inp.KeyCode == boundKey then
@@ -296,10 +286,10 @@ local function MkSection(parent, cfg, name)
         end
         function obj:Get() return state end
 
-        -- Register setter so Cfg:load() can push the saved value back into this widget
+        
         if flag then
             cfg:reg(flag, def, function(v)
-                -- v from JSON is bool
+                
                 local b = (v==true or v=="true")
                 obj:Set(b)
             end)
@@ -308,7 +298,7 @@ local function MkSection(parent, cfg, name)
         return obj
     end
 
-    -- ── SLIDER ──────────────────────────────────────────────────────
+    
     function S:AddSlider(o)
         o=o or {}
         local lbl=o.Name or "Value"; local mn=o.Min or 0; local mx=o.Max or 100
@@ -367,7 +357,7 @@ local function MkSection(parent, cfg, name)
         return obj
     end
 
-    -- ── DROPDOWN ────────────────────────────────────────────────────
+    
     function S:AddDropdown(o)
         o=o or {}
         local lbl=o.Name or "Select"; local items=o.Items or {}
@@ -386,8 +376,8 @@ local function MkSection(parent, cfg, name)
             TextTruncate=Enum.TextTruncate.AtEnd,
             Parent=dbox})
 
-        -- Arrow: a real chevron made of two rotated frames (not Unicode glyph)
-        -- This renders correctly on all Roblox fonts
+        
+        
         local arrHolder = New("Frame",{
             AnchorPoint=Vector2.new(1,0.5), Position=UDim2.new(1,-8,0.5,0),
             Size=UDim2.new(0,10,0,6),
@@ -404,9 +394,9 @@ local function MkSection(parent, cfg, name)
             })
             Rnd(1,f); return f
         end
-        mkChevLine(0.28,  40)  -- left arm of V
-        mkChevLine(0.72, -40)  -- right arm of V
-        -- Tween the holder's Rotation: 0=down, 180=up
+        mkChevLine(0.28,  40)  
+        mkChevLine(0.72, -40)  
+        
         local function setArrow(open)
             TW(arrHolder, 0.15, {Rotation = open and 180 or 0})
         end
@@ -474,7 +464,7 @@ local function MkSection(parent, cfg, name)
         end
         if flag then
             cfg:reg(flag, def, function(v)
-                -- find closest match in current items
+                
                 local s = tostring(v)
                 if table.find(items, s) then obj:Set(s) end
             end)
@@ -482,7 +472,7 @@ local function MkSection(parent, cfg, name)
         return obj
     end
 
-    -- ── COLOR PICKER ────────────────────────────────────────────────
+    
     function S:AddColorPicker(o)
         o=o or {}
         local lbl=o.Name or "Color"; local def=o.Default or Color3.fromRGB(235,75,175)
@@ -567,7 +557,7 @@ local function MkSection(parent, cfg, name)
         return obj
     end
 
-    -- ── BUTTON ──────────────────────────────────────────────────────
+    
     function S:AddButton(o)
         o=o or {}
         local lbl=o.Name or "Button"; local cb=o.Callback or function()end
@@ -596,9 +586,6 @@ local function NewCol(scroll, cfg)
     return C
 end
 
--- ════════════════════════════════════════════════════
---  LIBRARY
--- ════════════════════════════════════════════════════
 local Lib={}; Lib.__index=Lib
 
 function Lib.new(opts)
@@ -684,7 +671,7 @@ function Lib:CreateWindow(opts)
     local clip=New("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ClipsDescendants=true,Parent=W.Root})
     Rnd(8,clip)
 
-    -- TOPBAR
+    
     local topBar=New("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=T.TopBar,BorderSizePixel=0,Parent=clip})
     local titlePx = math.clamp(#title * 8, 30, 160)
     New("TextLabel",{Position=UDim2.new(0,12,0,0),Size=UDim2.new(0,titlePx,1,0),
@@ -714,7 +701,7 @@ function Lib:CreateWindow(opts)
     closeBtn.MouseLeave:Connect(function() TW(closeBtn,0.1,{BackgroundColor3=Color3.fromRGB(172,38,38)}) end)
     Drag(W.Root,topBar)
 
-    -- TAB ROW
+    
     local tabRow=New("Frame",{Position=UDim2.new(0,0,0,32),Size=UDim2.new(1,0,0,32),
         BackgroundColor3=T.TabBG,BorderSizePixel=0,Parent=clip})
     New("Frame",{AnchorPoint=Vector2.new(0,1),Position=UDim2.new(0,0,1,0),
@@ -817,6 +804,200 @@ function Lib:CreateWindow(opts)
 
     table.insert(self.Windows,W)
     return W
+end
+
+
+function Lib:CreateKeySystem(opts)
+    opts = opts or {}
+    local validKey    = opts.Key        or "NEBULA-FREE"
+    local getKeyUrl   = opts.GetKeyUrl  or "https://example.com/getkey"
+    local title       = opts.Title      or "Key System"
+    local subtitle    = opts.Subtitle   or "verification required"
+    local onSuccess   = opts.OnSuccess  or function() end
+    local savedFile   = (opts.SaveName  or "NebulaKey") .. ".txt"
+
+    if HAS_READFILE then
+        local ok, saved = pcall(readfile, savedFile)
+        if ok and saved and saved:match("^%s*(.-)%s*$") == validKey then
+            task.spawn(onSuccess)
+            return
+        end
+    end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NebulaKeySystem"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.DisplayOrder = 1000
+    sg.IgnoreGuiInset = true
+    local ok2 = pcall(function() sg.Parent = CoreGui end)
+    if not ok2 or not sg.Parent then sg.Parent = LP:WaitForChild("PlayerGui") end
+
+    local overlay = New("Frame", {
+        Size = UDim2.new(1,0,1,0),
+        BackgroundColor3 = Color3.fromRGB(8,8,10),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        Parent = sg,
+    })
+
+    local card = New("Frame", {
+        AnchorPoint = Vector2.new(0.5,0.5),
+        Position    = UDim2.new(0.5,0,0.5,0),
+        Size        = UDim2.new(0,380,0,260),
+        BackgroundColor3 = T.WinBG,
+        BorderSizePixel  = 0,
+        Parent = sg,
+    })
+    Rnd(10, card)
+    Brdr(Color3.fromRGB(44,44,56), 1, card)
+
+    local topBar = New("Frame", {
+        Size = UDim2.new(1,0,0,34),
+        BackgroundColor3 = T.TopBar,
+        BorderSizePixel  = 0,
+        Parent = card,
+    })
+    Rnd(10, topBar)
+    New("Frame", {
+        Position = UDim2.new(0,0,0.5,0),
+        Size     = UDim2.new(1,0,0.5,0),
+        BackgroundColor3 = T.TopBar,
+        BorderSizePixel  = 0,
+        Parent = topBar,
+    })
+
+    local titlePx = math.clamp(#title * 8, 30, 200)
+    New("TextLabel", {
+        Position = UDim2.new(0,12,0,0), Size = UDim2.new(0,titlePx,1,0),
+        BackgroundTransparency = 1, Text = title,
+        TextColor3 = Color3.fromRGB(112,112,132), TextSize = 12, Font = T.FontBold,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = topBar,
+    })
+    New("TextLabel", {
+        Position = UDim2.new(0,12+titlePx+4,0,0), Size = UDim2.new(0,10,1,0),
+        BackgroundTransparency = 1, Text = "›",
+        TextColor3 = Color3.fromRGB(50,50,65), TextSize = 11, Font = T.Font, Parent = topBar,
+    })
+    local bw = math.max(#subtitle*7+14, 40)
+    local badge = New("Frame", {
+        Position = UDim2.new(0,12+titlePx+18,0.5,-8), Size = UDim2.new(0,bw,0,16),
+        BackgroundColor3 = T.BadgeBG, BorderSizePixel = 0, Parent = topBar,
+    })
+    Rnd(4, badge)
+    New("TextLabel", {
+        Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1, Text = subtitle,
+        TextColor3 = T.Accent, TextSize = 10, Font = T.FontBold, Parent = badge,
+    })
+
+    local body = New("Frame", {
+        Position = UDim2.new(0,0,0,34), Size = UDim2.new(1,0,1,-34),
+        BackgroundTransparency = 1, Parent = card,
+    })
+
+    New("TextLabel", {
+        Position = UDim2.new(0,22,0,16), Size = UDim2.new(1,-44,0,14),
+        BackgroundTransparency = 1,
+        Text = "Enter your key below to continue",
+        TextColor3 = Color3.fromRGB(90,90,110), TextSize = 11, Font = T.Font,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = body,
+    })
+
+    local inputBg = New("Frame", {
+        Position = UDim2.new(0,18,0,38), Size = UDim2.new(1,-36,0,32),
+        BackgroundColor3 = T.DropBG, BorderSizePixel = 0, Parent = body,
+    })
+    Rnd(6, inputBg)
+    Brdr(T.DropBorder, 1, inputBg)
+    local inputBox = New("TextBox", {
+        Position = UDim2.new(0,10,0,0), Size = UDim2.new(1,-20,1,0),
+        BackgroundTransparency = 1,
+        PlaceholderText = "Paste key here...",
+        PlaceholderColor3 = Color3.fromRGB(60,60,78),
+        Text = "", TextColor3 = T.ItemLabel,
+        TextSize = 13, Font = T.Font,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false, Parent = inputBg,
+    })
+
+    local statusLbl = New("TextLabel", {
+        Position = UDim2.new(0,18,0,80), Size = UDim2.new(1,-36,0,14),
+        BackgroundTransparency = 1, Text = "",
+        TextColor3 = Color3.fromRGB(90,90,110), TextSize = 11, Font = T.Font,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = body,
+    })
+
+    local function mkBtn(xOff, w, label, accent)
+        local bg = New("TextButton", {
+            Position = UDim2.new(0, xOff, 0, 106),
+            Size     = UDim2.new(0, w, 0, 32),
+            BackgroundColor3 = accent and T.Accent or T.DropBG,
+            BorderSizePixel  = 0, Text = label,
+            TextColor3 = accent and Color3.new(1,1,1) or T.ItemLabel,
+            TextSize = 12, Font = T.FontBold,
+            AutoButtonColor = false, Parent = body,
+        })
+        Rnd(6, bg)
+        Brdr(accent and T.AccentDark or T.DropBorder, 1, bg)
+        bg.MouseEnter:Connect(function()
+            TW(bg, 0.08, {BackgroundColor3 = accent and T.AccentDark or T.DropHover})
+        end)
+        bg.MouseLeave:Connect(function()
+            TW(bg, 0.08, {BackgroundColor3 = accent and T.Accent or T.DropBG})
+        end)
+        return bg
+    end
+
+    local btnW = 156
+    local checkBtn  = mkBtn(18,          btnW, "Check Key",  true)
+    local getKeyBtn = mkBtn(18+btnW+10,  btnW, "Get Key",    false)
+
+    New("TextLabel", {
+        Position = UDim2.new(0,18,0,152), Size = UDim2.new(1,-36,0,38),
+        BackgroundTransparency = 1,
+        Text = "Click 'Get Key' to open the key page, copy your key,\nthen paste it above and press 'Check Key'.",
+        TextColor3 = Color3.fromRGB(58,58,74), TextSize = 10, Font = T.Font,
+        TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, Parent = body,
+    })
+
+    checkBtn.MouseButton1Click:Connect(function()
+        local entered = inputBox.Text:match("^%s*(.-)%s*$")
+        if entered == validKey then
+            if HAS_WRITEFILE then pcall(writefile, savedFile, entered) end
+            statusLbl.Text = "Key accepted!"
+            statusLbl.TextColor3 = Color3.fromRGB(45,195,85)
+            TW(inputBg, 0.15, {BackgroundColor3 = Color3.fromRGB(18,38,22)})
+            task.delay(0.6, function()
+                TW(card, 0.3, {Size = UDim2.new(0,380,0,0), Position = UDim2.new(0.5,0,0.5,0)})
+                TW(overlay, 0.3, {BackgroundTransparency = 1})
+                task.wait(0.35)
+                pcall(function() sg:Destroy() end)
+                task.spawn(onSuccess)
+            end)
+        else
+            statusLbl.Text = "Invalid key. Try again."
+            statusLbl.TextColor3 = Color3.fromRGB(208,50,50)
+            TW(inputBg, 0.1, {BackgroundColor3 = Color3.fromRGB(38,12,12)})
+            task.delay(0.5, function()
+                TW(inputBg, 0.2, {BackgroundColor3 = T.DropBG})
+            end)
+        end
+    end)
+
+    getKeyBtn.MouseButton1Click:Connect(function()
+        local ok3 = pcall(function()
+            if setclipboard then
+                setclipboard(getKeyUrl)
+            elseif toclipboard then
+                toclipboard(getKeyUrl)
+            end
+        end)
+        statusLbl.Text = ok3 and "Link copied to clipboard!" or "Open: " .. getKeyUrl
+        statusLbl.TextColor3 = ok3 and T.Accent or Color3.fromRGB(210,168,35)
+    end)
+
+    card.Position = UDim2.new(0.5,0,0.4,0)
+    TW(card, 0.35, {Position = UDim2.new(0.5,0,0.5,0)})
 end
 
 return Lib
